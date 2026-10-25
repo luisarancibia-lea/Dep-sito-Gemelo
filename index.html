@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Gemelo digital de depósito</title>
+<style>
+:root{--bg:#EEF0F2;--panel:#fff;--ink:#1B2630;--mute:#5B6975;--line:#D3D9DE;--a:#E8590C;--b:#2F6FA3;--c:#8A99A6;--ok:#1E7F4F;--warn:#9A6700;--bad:#C0392B;color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#14191E;--panel:#1D242B;--ink:#E8ECEF;--mute:#9AA7B2;--line:#2E3841;--ok:#4CC38A;--warn:#E3B341;--bad:#FF7B6B;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#14191E;--panel:#1D242B;--ink:#E8ECEF;--mute:#9AA7B2;--line:#2E3841;--ok:#4CC38A;--warn:#E3B341;--bad:#FF7B6B;color-scheme:dark}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.app{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:12px;padding:12px;max-width:1280px;margin:0 auto}
+h1{font-size:20px;margin:0;letter-spacing:-.01em}
+.sub{color:var(--mute);font-size:13px;margin:2px 0 0}
+.stage{position:relative;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--panel);min-height:340px;height:calc(100vh - 150px);touch-action:none}
+canvas{display:block;width:100%;height:100%}
+.legend{position:absolute;left:10px;bottom:10px;display:flex;gap:10px;flex-wrap:wrap;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:6px 10px;font-size:12px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+.side{display:flex;flex-direction:column;gap:12px;min-width:0}
+.box{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px}
+.box h2{font-size:14px;margin:0 0 8px}
+.kpis{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.k{border-left:3px solid var(--line);padding-left:8px}
+.k b{display:block;font-size:20px;line-height:1.15;font-variant-numeric:tabular-nums}
+.k span{font-size:12px;color:var(--mute)}
+.k.hl{border-color:var(--a)}
+.st{display:inline-block;margin-top:8px;padding:3px 9px;border-radius:99px;font-size:13px;font-weight:600;border:1.5px solid currentColor}
+label{display:block;font-size:13px;margin:8px 0 0}
+label span{float:right;font-variant-numeric:tabular-nums;color:var(--mute)}
+input[type=range]{width:100%;accent-color:var(--b);margin:2px 0 0}
+input:focus-visible{outline:2px solid var(--b);outline-offset:2px}
+.note{font-size:12px;color:var(--mute);margin:0}
+@media (max-width:860px){.app{grid-template-columns:minmax(0,1fr)}.stage{height:54vh}}
+</style>
+</head>
+<body>
+<div class="app">
+ <div style="grid-column:1/-1"><h1>Gemelo digital de depósito</h1><p class="sub">Arrastrá para girar, rueda o pellizco para acercar. Cambiá el diseño y la operación y mirá cómo responden los indicadores.</p></div>
+ <div class="stage" id="stage">
+  <div class="legend"><span><i style="background:var(--a)"></i>Zona A (cerca de rampa)</span><span><i style="background:var(--b)"></i>Zona B</span><span><i style="background:var(--c)"></i>Zona C</span></div>
+ </div>
+ <div class="side">
+  <div class="box"><h2>Indicadores</h2>
+   <div class="kpis" id="kpis"></div>
+   <span class="st" id="status"></span>
+  </div>
+  <div class="box"><h2>Diseño</h2><div id="c1"></div></div>
+  <div class="box"><h2>Operación (prueba de estrés)</h2><div id="c2"></div></div>
+  <p class="note">Datos simulados con fines académicos. Modelo simplificado: 26 pallets por camión, retráctil a 2,2 m/s, 40 s de maniobra por pallet, ABC con zona A en el primer tercio del depósito. La espera en rampa usa una aproximación de colas, no una simulación de eventos.</p>
+ </div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+const P={aisles:6,bays:16,levels:4,aw:3.2,occ:85,pa:80,tph:4,reach:3};
+const DEF=[
+ ['c1','aisles','Pasillos',2,12,1,''],['c1','bays','Módulos por pasillo',6,28,1,''],['c1','levels','Niveles de rack',2,6,1,''],['c1','aw','Ancho de pasillo',2.5,4.5,.1,' m'],
+ ['c2','occ','Ocupación',40,100,1,' %'],['c2','pa','Picking en zona A',34,95,1,' %'],['c2','tph','Camiones por hora',1,14,1,''],['c2','reach','Retráctiles disponibles',1,8,1,'']
+];
+DEF.forEach(([box,key,txt,min,max,step,u])=>{
+ const l=document.createElement('label');
+ l.innerHTML=txt+' <span id="v_'+key+'"></span><input type="range" min="'+min+'" max="'+max+'" step="'+step+'" value="'+P[key]+'" aria-label="'+txt+'">';
+ const inp=l.querySelector('input'),out=l.querySelector('span');
+ const show=()=>out.textContent=(key==='aw'?P[key].toFixed(1).replace('.',','):P[key])+u;
+ inp.oninput=()=>{P[key]=+inp.value;show();(['occ','pa','tph','reach'].includes(key))?kpis():(build(),kpis())};
+ show();document.getElementById(box).appendChild(l);
+});
+
+const stage=document.getElementById('stage');
+const renderer=new THREE.WebGLRenderer({antialias:true,alpha:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+stage.appendChild(renderer.domElement);
+const scene=new THREE.Scene();
+const cam=new THREE.PerspectiveCamera(45,1,.5,600);
+scene.add(new THREE.AmbientLight(0xffffff,.75));
+const sun=new THREE.DirectionalLight(0xffffff,.7);sun.position.set(40,80,30);scene.add(sun);
+let th=.6,ph=.95,R=90,group,movers=[],dims={};
+function setCam(){cam.position.set(R*Math.sin(ph)*Math.sin(th),R*Math.cos(ph),R*Math.sin(ph)*Math.cos(th));cam.lookAt(0,0,0)}
+function resize(){const w=stage.clientWidth,h=stage.clientHeight;renderer.setSize(w,h);cam.aspect=w/h;cam.updateProjectionMatrix()}
+addEventListener('resize',resize);
+
+const ptr=new Map();let pd=0;
+stage.addEventListener('pointerdown',e=>{stage.setPointerCapture(e.pointerId);ptr.set(e.pointerId,[e.clientX,e.clientY])});
+stage.addEventListener('pointerup',e=>{ptr.delete(e.pointerId);pd=0});
+stage.addEventListener('pointermove',e=>{
+ if(!ptr.has(e.pointerId))return;const o=ptr.get(e.pointerId);
+ if(ptr.size===1){th-=(e.clientX-o[0])*.008;ph=Math.min(1.5,Math.max(.15,ph-(e.clientY-o[1])*.008))}
+ ptr.set(e.pointerId,[e.clientX,e.clientY]);
+ if(ptr.size===2){const [a,b]=[...ptr.values()];const d=Math.hypot(a[0]-b[0],a[1]-b[1]);if(pd)R=Math.min(220,Math.max(25,R*pd/d));pd=d}
+ setCam();
+});
+stage.addEventListener('wheel',e=>{e.preventDefault();R=Math.min(220,Math.max(25,R*(1+e.deltaY*.001)));setCam()},{passive:false});
+
+function rng(s){return()=>{s|=0;s=s+0x6D2B79F5|0;let t=Math.imul(s^s>>>15,1|s);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+const ZC=[0xE8590C,0x2F6FA3,0x8A99A6];
+
+function build(){
+ if(group){scene.remove(group);group.traverse(o=>o.geometry&&o.geometry.dispose())}
+ group=new THREE.Group();scene.add(group);
+ const n=P.aisles,pitch=2.4+P.aw,W=(n+1)*2.4+n*P.aw,L=P.bays*2.7,DOCK=12;
+ const ox=-W/2,oz=-(DOCK+L)/2,H=P.levels*1.8;
+ dims={n,pitch,W,L,DOCK,ox,oz};
+ const mk=(g,c)=>new THREE.Mesh(g,new THREE.MeshLambertMaterial({color:c}));
+ const fl=mk(new THREE.PlaneGeometry(W+8,DOCK+L+16),0xB9C0C6);fl.rotation.x=-Math.PI/2;fl.position.set(0,0,-3);group.add(fl);
+ const dz=mk(new THREE.PlaneGeometry(W,DOCK),0xD9DEE2);dz.rotation.x=-Math.PI/2;dz.position.set(0,.02,oz+DOCK/2);group.add(dz);
+ const ln=mk(new THREE.PlaneGeometry(W,.3),0xF2B705);ln.rotation.x=-Math.PI/2;ln.position.set(0,.03,oz+DOCK);group.add(ln);
+ // muelles y camiones
+ const doors=4;dims.doorX=[];
+ for(let d=0;d<doors;d++){const x=-W/2+W*(d+.5)/doors;dims.doorX.push(x);
+  const dr=mk(new THREE.BoxGeometry(3,3.2,.5),0x4A5661);dr.position.set(x,1.6,oz);group.add(dr);
+  if(d<Math.min(doors,Math.ceil(P.tph/3.5))){const tr=mk(new THREE.BoxGeometry(2.6,3.2,9),0xF4F6F7);tr.position.set(x,1.8,oz-5.2);group.add(tr)}}
+ // racks (estructura)
+ const pos=[];
+ for(let i=0;i<=n;i++){const x0=ox+i*pitch;
+  for(const dx of[0,2.4]){
+   for(let b=0;b<=P.bays;b++){const z=oz+DOCK+b*2.7;pos.push(x0+dx,0,z,x0+dx,H,z)}
+   for(let l=0;l<=P.levels;l++){const y=l*1.8;pos.push(x0+dx,y,oz+DOCK,x0+dx,y,oz+DOCK+L)}}}
+ const lg=new THREE.BufferGeometry();lg.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));
+ group.add(new THREE.LineSegments(lg,new THREE.LineBasicMaterial({color:0x3C4A56})));
+ // pallets
+ const cap=2*n*P.bays*P.levels*2,r=rng(7);
+ const im=new THREE.InstancedMesh(new THREE.BoxGeometry(1.05,1.25,1.15),new THREE.MeshLambertMaterial({color:0xffffff}),cap);
+ const m=new THREE.Matrix4(),col=new THREE.Color();let k=0;
+ for(let a=0;a<n;a++){const ax=ox+a*pitch+2.4+P.aw/2;
+  for(const side of[-1,1])for(let b=0;b<P.bays;b++){const z=ox*0+oz+DOCK+b*2.7;const zone=Math.min(2,Math.floor(b/P.bays*3));
+   for(let s=0;s<2;s++)for(let l=0;l<P.levels;l++){
+    if(r()*100>P.occ)continue;
+    m.setPosition(ax+side*(P.aw/2+.6+.0)- side*0,l*1.8+.95,z+.8+s*1.3);
+    im.setMatrixAt(k,m);im.setColorAt(k,col.setHex(ZC[zone]));k++}}}
+ im.count=k;group.add(im);
+ camFit();
+}
+function camFit(){R=Math.max(dims.W,dims.L+dims.DOCK)*1.25+10;setCam()}
+
+function spawn(){
+ const{n,pitch,ox,oz,DOCK,L,doorX}=dims;
+ const dx=doorX[Math.floor(Math.random()*doorX.length)];
+ const a=Math.floor(Math.random()*n),ax=ox+a*pitch+2.4+P.aw/2;
+ const zone=Math.random()<P.pa/100?0:(Math.random()<.75?1:2);
+ const tz=oz+DOCK+(zone/3+Math.random()/3)*L;
+ const mesh=new THREE.Mesh(new THREE.BoxGeometry(1.1,1.2,1.2),new THREE.MeshLambertMaterial({color:0xF2B705}));
+ const pts=[[dx,.7,oz+1],[dx,.7,oz+DOCK-1.5],[ax,.7,oz+DOCK-1.5],[ax,.7,tz]].map(p=>new THREE.Vector3(...p));
+ mesh.position.copy(pts[0]);group.add(mesh);movers.push({mesh,pts,i:1});
+}
+let acc=0,last=performance.now();
+function loop(t){
+ const dt=Math.min(.05,(t-last)/1000);last=t;
+ acc+=dt*(P.tph*26/3600)*40;
+ while(acc>1){acc--;if(movers.length<60)spawn()}
+ for(let j=movers.length-1;j>=0;j--){const mv=movers[j],tg=mv.pts[mv.i],d=tg.clone().sub(mv.mesh.position),s=9*dt;
+  if(d.length()<=s){mv.mesh.position.copy(tg);mv.i++;if(mv.i>=mv.pts.length){group.remove(mv.mesh);mv.mesh.geometry.dispose();movers.splice(j,1)}}
+  else mv.mesh.position.add(d.normalize().multiplyScalar(s))}
+ renderer.render(scene,cam);requestAnimationFrame(loop);
+}
+
+function kpis(){
+ const{n,W,L}=dims,cap=2*n*P.bays*P.levels*2,stored=Math.round(cap*P.occ/100);
+ const pa=P.pa/100,pb=(1-pa)*.75,pc=(1-pa)*.25;
+ const abc=(pa/6+pb/2+pc*5/6)*L,red=Math.round((1-abc/(L/2))*100);
+ const dist=12+abc+W/4,cyc=2*dist/2.2+40+(P.levels/2)*12;
+ const rho=P.tph*26*cyc/(P.reach*3600),c=P.reach;
+ const wq=rho>=1?null:cyc/60*Math.pow(rho,Math.sqrt(2*(c+1))-1)/(c*(1-rho));
+ const f=(x,d=1)=>x.toFixed(d).replace('.',',');
+ const items=[
+  ['Capacidad',cap.toLocaleString('es-AR')+' pallets'],['Almacenado',stored.toLocaleString('es-AR')+' pallets'],
+  ['Superficie',Math.round(W*(L+12)).toLocaleString('es-AR')+' m²'],['Menos recorrido de picking (ABC)',red+' %','hl'],
+  ['Ciclo de ingreso por pallet',f(cyc/60)+' min'],['Uso de retráctiles',Math.min(999,Math.round(rho*100))+' %'],
+  ['Espera en rampa por pallet',wq===null?'sin límite':f(wq)+' min','hl'],['Pallets recibidos por hora',P.tph*26+'']
+ ];
+ document.getElementById('kpis').innerHTML=items.map(i=>'<div class="k '+(i[2]||'')+'"><b>'+i[1]+'</b><span>'+i[0]+'</span></div>').join('');
+ const s=document.getElementById('status');
+ const[tx,cl]=rho<.7?['Operación holgada','--ok']:rho<.9?['Operación ajustada','--warn']:['Cuello de botella','--bad'];
+ s.textContent=tx;s.style.color='var('+cl+')';
+}
+build();kpis();resize();setCam();requestAnimationFrame(loop);
+</script>
+</body>
+</html>
